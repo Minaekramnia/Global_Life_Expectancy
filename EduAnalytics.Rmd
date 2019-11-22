@@ -1,0 +1,170 @@
+---
+title: "EduAnalytics"
+author: "MinaEkramnia"
+date: "11/19/2019"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+require("httr")
+require("jsonlite")
+library(tidyverse)
+library(dplyr)
+#library(raster)
+library(tidyr)
+#library(spData)
+#library(spDataLarge)
+#library(tmap)    # for static and interactive maps
+#library(leaflet) # for interactive maps
+#library(mapview) # for interactive maps
+library(ggplot2) # tidyverse data visualization package
+library(reshape2)
+#library(shiny)   # for web applications
+#require("plyr")
+#require(rgdal)
+#library(sf)
+```
+
+### Retrieving the Data from the API
+Using World Bank API, I derived the API for the Life Expectancy at birth (in years) for all countries in the WDI starting 1960. I was using JSON format at first, however since Rsdmx function in R doesn't work well with JSON, I decided to download the file from the API and then use it. 
+```{r retrieve, include=TRUE}
+#setting general working directory
+cd <- getwd()
+temp <- tempfile()
+#temp <- filepath
+download.file("https://api.worldbank.org/v2/en/country/all/indicator/SP.DYN.LE00.IN?downloadformat=csv&per_page=20000&source=2",temp)
+# unzipping the downloaded file into an exported directory
+unzip(temp, exdir = "WBDATA")
+```
+
+```{r read, include=FALSE}
+#Reading the Data
+filepath <- paste(cd,"/","WBDATA", sep="")
+#Life Expectancy data
+df1 <-read.csv(file = paste(filepath,"/","API_SP.DYN.LE00.IN_DS2_en_csv_v2_509980.csv", sep=""), header=T, skip=4)
+#Metadata
+df2 <- read.csv(file = paste(filepath,"/","Metadata_Country_API_SP.DYN.LE00.IN_DS2_en_csv_v2_509980.csv", sep=""), header=TRUE, sep=",")
+```
+
+
+```{r overview, include = FALSE}
+### Data Overview
+#First we want to explore the raw-data and see how can we improve it to transform it to a usable format. 
+#As we see it is a wide dataset that years are in different columns. 
+
+# Life Expectancy Data
+head(df1)
+# Metadata of the Countries
+head(df2)
+```
+
+###Merge both data sets
+I merged the datasets for Life Expectancy and Metadata so that we can have more information regarding the countries income level and region. 
+```{r merge, echo = TRUE}
+# merge two data frames by ID
+total <- merge(df1,df2,by="Country.Code")
+```
+
+###Preprocessing the Data 
+In order to be able to use the data, I transformed it to long format so that all the years are in one column. 
+```{r reshape, echo = TRUE}
+total_long <-melt(total, id.vars=c("Country.Code", "Country.Name", "Indicator.Name", "Indicator.Code","Region", "IncomeGroup", "SpecialNotes","TableName", "X.x","X.y"))
+
+#Dropping NAs for Life Expectancy value
+total_long <-drop_na(total_long,value)
+total_long <-drop_na(total_long,Region)
+
+#renaming columns 
+names(total_long)[names(total_long) == "value"] <- "LifeExp"
+names(total_long)[names(total_long) == "variable"] <- "Year"
+```
+
+### Plot Worldwide Life Expectancy
+```{r plots, echo=TRUE}
+plot(LifeExp ~ Year, 
+     data = total_long, 
+     xlab = "Year", 
+     ylab = "Life expectancy",
+     main = "Worldwide Life expectancy", 
+     col = "red", 
+     cex.lab = 1,
+     cex.main= 1,
+     pch = 10)
+```
+
+### Plot Worldwide Life Expectancy
+```{r plots2, echo=TRUE}
+#Group Plot for each Region
+ggplot(data = total_long, 
+        aes(x = Year, y = LifeExp, 
+            group = Country.Name, 
+            color = Region)) +
+   geom_line() +
+   xlab("Year") + 
+   ylab("Life expectancy") +
+   ggtitle("Life expectancy over time") +
+   theme_bw() +  
+   facet_wrap(~ Region) +
+   theme(legend.position = "bottom")
+
+```
+
+As we see from the plots above, there is a big fluctuation in Iran's life expectancy during 1979 to 1988 years.
+This can be due to the revolution and the war with Iraq during that period. In order to confirm our results we take a look at Iraq's trend too. 
+
+```{r plots3, echo= FALSE}
+Iran <- total_long %>% filter(Country.Name=="Iran, Islamic Rep.")
+Iraq <- total_long %>% filter(Country.Name=="Iraq")
+China <- total_long %>% filter(Country.Name=="China")
+ggplot(data = Iran, 
+        aes(x = Year, y = LifeExp, 
+            group = Country.Name)) +
+   geom_line() +
+   xlab("Year") + 
+   ylab("Life expectancy") +
+   ggtitle("Iran Life expectancy over time") +
+   theme_bw() + 
+   theme(legend.position = "bottom")
+
+ggplot(data = Iraq, 
+        aes(x = Year, y = LifeExp, 
+            group = Country.Name)) +
+   geom_line() +
+   xlab("Year") + 
+   ylab("Life expectancy") +
+   ggtitle("Iraq Life expectancy over time") +
+   theme_bw() + 
+   theme(legend.position = "bottom")
+```
+
+In order to investigate the cause behind the drop of life expectancy in Iran, we calculate the correlation between Iran and Iraq trend. If their drop is due to war, they should have a high correlation. Then we compare this number to other countries like China. 
+
+```{r correlation, echo= FALSE}
+cor.test(Iran$LifeExp,Iraq$LifeExp)
+cor.test(Iran$LifeExp,China$LifeExp)
+```
+
+## Restuls
+As we see there is 96% correlation between Iran and Iraq trend of life expectancy which shows that war, increasing infant mortality rate and lack of access to an appropriate healthcare system is the reason behind that. Gradually, improvements in health and welfare increase life expectancy.
+
+
+###Map of the world
+Here we can see the Life Expectancy across different countries. 
+```{r mapping, echo=FALSE}
+####
+#ggplot(data = total, aes(x = total, y = pop)) + 
+ # geom_line(color = "#FC4E07", size = 2)
+#world<-st_read(".shp")
+
+#ggplot(LEmap) +
+#  geom_sf(aes(fill=average of LE joined$goS_learning_p)))color=NA) +
+#  scale_fill_gradient(low=, high=)
+ # theme(legend.position =
+   #       "bottom") +
+  #ggtitle("Brazil Hot Spot Map",
+  #subtitle="Year 2013") +
+#  theme_minimal() + scale_colour_manual(values = col,  labels = c("Hot Spot - 90% Confidence", "Hot Spot - #95% Confidence", "Hot Spot - 99% Confidence", "Not Significant", "Cold Spot - 90% Confidence", "Cold Spot - 95% Confidence", "Cold Spot - 99% Confidence"))
+  #The higher the life expectancy, the better shape a country is in. As you can see from the map, more developed regions of the world generally have higher life expectancies (green) than less developed regions with lower life expectancies (red)
+#  tmap is cool. use it!}
+```
+
