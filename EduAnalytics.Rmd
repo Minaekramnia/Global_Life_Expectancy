@@ -1,0 +1,158 @@
+---
+title: "Data Analysis Exercise"
+author: "Mina Ekramnia"
+date: "11/19/2019"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+require("httr")
+require("jsonlite")
+library(tidyverse)
+library(dplyr)
+library(tidyr)
+library(ggplot2) # tidyverse data visualization package
+library(reshape2)
+#require("plyr")
+#require(rgdal)
+```
+
+
+###Intoduction
+According to United Nation's Indicators of Sustainable Development, Life expectancy at birth is defined as the average number of years that a newborn could expect to live if he or she were to pass through life subject to the age-specific mortality rates of a given period. Life expectancy is a measure that is often used to gauge the overall health of a community. Here, we are going to analyze the trend of life extency at birth, between the years of 1960-2017, and demonstrate some highlights. 
+
+### Retrieving the Data from the API
+Using World Bank API, I derived the data for the Life Expectancy at birth (in years) for all the countries in the WDI starting 1960. Since R does not work well with JSON file format from the APIs, I download the files as CSV and then read it. 
+
+```{r retrieve, include=TRUE}
+#setting general working directory
+cd <- getwd()
+temp <- tempfile()
+#temp <- filepath
+download.file("https://api.worldbank.org/v2/en/country/all/indicator/SP.DYN.LE00.IN?downloadformat=csv&per_page=20000&source=2",temp)
+# unzipping the downloaded file into an exported directory
+unzip(temp, exdir = "WBDATA")
+
+#Reading the data
+filepath <- paste(cd,"/","WBDATA", sep="")
+files <-list.files(filepath)
+#Life Expectancy data
+df1 <-read.csv(file = paste(filepath,"/",files[1], sep=""), header=T, skip=4)
+#Metadata
+df2 <- read.csv(file = paste(filepath,"/",files[2], sep=""), header=TRUE, sep=",")
+```
+
+
+```{r overview, include = FALSE}
+### Data Overview
+#First we want to explore the raw-data and see how can we improve it to transform it to a usable format.
+
+# Life Expectancy Data
+summary(df1)
+head(df1)
+# Metadata of the Countries
+head(df2)
+```
+
+###Preprocessing the Data 
+In order to be able to use the data, I did some preprocess on the data. First, merged the Life Expectancy dataset with the meta data one so that we have information about each country's region and income level. Then transformed the result in to long format so that all the years are in one column. Then removed then NAs and rename the columns so that it will be easier to use. 
+
+```{r reshape, echo = TRUE}
+# merge two data frames by ID
+total <- merge(df1,df2,by="Country.Code")
+
+total_long <-melt(total, id.vars=c("Country.Code", "Country.Name", "Indicator.Name", "Indicator.Code","Region", "IncomeGroup", "SpecialNotes","TableName", "X.x","X.y"))
+
+#Dropping NAs for Life Expectancy value
+total_long <-drop_na(total_long,value)
+total_long <-drop_na(total_long,Region)
+
+#renaming columns 
+names(total_long)[names(total_long) == "value"] <- "LifeExp"
+names(total_long)[names(total_long) == "variable"] <- "Year"
+
+#renaming years in each raw cause when R read them has added an X before the numbers
+total_long$Year <- substring(total_long$Year,2)
+```
+
+Now that we have our data cleaned, we are ready to do some exploration and analysis.  
+First we plot Life Expectancy by year for each country group by each region. As we see they all have similar increasing trends between 1960-2017. 
+
+```{r plot1, echo=TRUE}
+#Group Plot for each Region
+ggplot(data = total_long, 
+        aes(x = Year, y = LifeExp, 
+            group = Country.Name, 
+            color = Region)) +
+   geom_line() +
+   xlab("Year") + 
+   ylab("Life expectancy") +
+   ggtitle("Life expectancy over time") +
+   theme_bw() +  
+   facet_wrap(~ Region) +
+   theme(legend.position = "bottom")
+
+```
+
+Then I was curious about each country's behavior in the Middle East. So I zoomed in for Middle East & South Africa and plotted the results. 
+ 
+```{r plot2, echo= FALSE}
+Middleast <- total_long %>% filter(Region=="Middle East & North Africa")
+ggplot(data = Middleast , 
+        aes(x = Year, y = LifeExp, 
+            group = Country.Name)) +
+   geom_line() +
+   xlab("Year") + 
+   ylab("Life expectancy") +
+   ggtitle("Middle East Life expectancy over time") +
+   facet_wrap(~ Country.Name) 
+```
+
+Looking closely to the plots above, we see a significant drop in Iran's life expectancy that we wanted to investigate. When we plot the results for Iran, we see this decreasing rate starts from 1977, reach a minimum and then increase to a steady rate until around 1992. This is exactly around the period that the protests before 1979 revolution start and followed by the war with Iraq until 1988. In order to strenghten our hypothesis, we will take a look at Iraq's Life Expectancy trend during that period.Then we calculate the correlation between Iran and Iraq trend. If the drop in their trend is due to the mutual war between them, there should be a higher correlation than a correlation with a random country like China. Below we will see the results. 
+
+```{r plots3, echo= FALSE}
+Iran <- total_long %>% filter(Country.Name=="Iran, Islamic Rep.")
+Iraq <- total_long %>% filter(Country.Name=="Iraq")
+China <- total_long %>% filter(Country.Name=="China")
+ggplot(data = Iran, 
+        aes(x = Year, y = LifeExp, 
+            group = Country.Name)) +
+   geom_line() +
+   xlab("Year") + 
+   ylab("Life expectancy") +
+   ggtitle("Iran Life expectancy over time") +
+   theme_bw() + 
+   theme(legend.position = "bottom", axis.text.x = element_text(angle=90, hjust=1))
+
+ggplot(data = Iraq, 
+        aes(x = Year, y = LifeExp, 
+            group = Country.Name)) +
+   geom_line() +
+   xlab("Year") + 
+   ylab("Life expectancy") +
+   ggtitle("Iraq Life expectancy over time") +
+   theme_bw() + 
+   theme(legend.position = "bottom", axis.text.x = element_text(angle=90, hjust=1))
+```
+
+
+```{r correlation, echo= FALSE}
+cor.test(Iran$LifeExp,Iraq$LifeExp)
+cor.test(Iran$LifeExp,China$LifeExp)
+```
+
+### Correlation Analysis
+
+As we expected, there is a significantly high correlation (95.92%, p-value < 2.2e-16) between Iran and Iraq trend of life-expectancy in compare to correlation between Iran and China (87.8%, p-value < 2.2e-16) which demonstrates that they had similar underlying social environmental situation such as war which led to increasing infant mortality rate and lack of access to appropriate healthcare system. Life expectancy at birth is strongly influenced by infant and child mortality; Gradually, improvements in health and welfare increase life expectancy as the plots above demonstrate.
+
+###Other Possible Analysis
+It is also worth to plot the cross correlation between all the countries trends and see if countries with similar income level have high correlation rate with each other. Unfortunately, due to the limited time and current political situations in home country, I could not continue my farther analysis. 
+
+
+
+
+
+
+
+
+
